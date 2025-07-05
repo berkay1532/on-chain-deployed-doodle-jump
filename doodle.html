@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Doodle Jump - Canvas Version (Improved Platforms)</title>
+    <style>
+      /* Basic styles for full-screen canvas */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #222;
+      }
+      #scoreDisplay {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: #fff;
+        font-size: 18px;
+        font-family: Arial, sans-serif;
+        z-index: 999;
+      }
+      #gameOverMsg {
+        display: none;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.7);
+        color: #fff;
+        padding: 30px 40px;
+        font-family: Arial, sans-serif;
+        text-align: center;
+        border-radius: 10px;
+      }
+      #gameOverMsg button {
+        margin-top: 15px;
+        padding: 8px 16px;
+        cursor: pointer;
+        background: #ff9800;
+        border: none;
+        font-size: 16px;
+        border-radius: 6px;
+      }
+      #gameOverMsg button:hover {
+        background: #ff7500;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="scoreDisplay">Score: 0</div>
+    <div id="gameOverMsg">
+      <h2>Game Over!</h2>
+      <p id="finalScore"></p>
+      <button id="restartBtn">Play Again</button>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      const scoreDisplay = document.getElementById("scoreDisplay");
+      const gameOverMsg = document.getElementById("gameOverMsg");
+      const finalScoreEl = document.getElementById("finalScore");
+      const restartBtn = document.getElementById("restartBtn");
+
+      // Make canvas full screen
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      // Player properties
+      const player = {
+        x: canvas.width / 2,
+        y: 0, // To be set based on starting platform
+        width: 40,
+        height: 40,
+        vx: 0,
+        vy: 0,
+        color: "green",
+      };
+
+      // Game state variables
+      let platforms = [];
+      let isGameOver = false;
+      let score = 0;
+      let highestPlatformY = Infinity; // Y coordinate of the highest (lowest y) platform on screen
+
+      // Physics constants
+      const gravity = 0.3;
+      const jumpPower = -10;
+      const moveSpeed = 10; // Increased horizontal speed
+
+      // Platform settings
+      const platformWidth = 80;
+      const platformHeight = 10;
+      const platformGap = 120; // Vertical gap between platforms
+      const maxHorizontalOffset = 150; // New platforms will spawn within ±150px of player's current x
+
+      // Keyboard controls
+      let keys = { left: false, right: false };
+
+      function init() {
+        isGameOver = false;
+        score = 0;
+        scoreDisplay.textContent = "Score: 0";
+
+        // Create the starting platform at the bottom center
+        platforms = [];
+        const startingPlatformY = canvas.height - platformHeight - 20;
+        const startingPlatform = {
+          x: (canvas.width - platformWidth) / 2,
+          y: startingPlatformY,
+          width: platformWidth,
+          height: platformHeight,
+          color: "#444",
+        };
+        platforms.push(startingPlatform);
+        highestPlatformY = startingPlatform.y;
+
+        // Create additional platforms above the starting one at fixed vertical intervals
+        let currentY = startingPlatform.y - platformGap;
+        for (let i = 1; i < 8; i++) {
+          let platformX = Math.random() * (canvas.width - platformWidth);
+          let newPlatform = {
+            x: platformX,
+            y: currentY,
+            width: platformWidth,
+            height: platformHeight,
+            color: "#444",
+          };
+          platforms.push(newPlatform);
+          if (newPlatform.y < highestPlatformY)
+            highestPlatformY = newPlatform.y;
+          currentY -= platformGap;
+        }
+
+        // Place player on the starting platform
+        player.x = (canvas.width - player.width) / 2;
+        player.y = startingPlatform.y - player.height;
+        player.vx = 0;
+        player.vy = 0;
+
+        gameOverMsg.style.display = "none";
+        requestAnimationFrame(gameLoop);
+      }
+
+      function gameLoop(timestamp) {
+        if (isGameOver) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        updatePlayer();
+        updatePlatforms();
+        checkCollisions();
+
+        drawPlatforms();
+        drawPlayer();
+
+        scoreDisplay.textContent = "Score: " + Math.floor(score);
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      function updatePlayer() {
+        // Keyboard controls for horizontal movement
+        if (keys.left) {
+          player.vx = -moveSpeed;
+        } else if (keys.right) {
+          player.vx = moveSpeed;
+        } else {
+          player.vx = 0;
+        }
+
+        // Update horizontal position and apply wrap-around logic
+        player.x += player.vx;
+        if (player.x + player.width < 0) {
+          player.x = canvas.width;
+        }
+        if (player.x > canvas.width) {
+          player.x = -player.width;
+        }
+
+        // Apply gravity and update vertical position
+        player.vy += gravity;
+        player.y += player.vy;
+
+        // When player moves above half the screen, shift platforms down
+        if (player.y < canvas.height / 2) {
+          let offset = canvas.height / 2 - player.y;
+          player.y = canvas.height / 2;
+          for (let p of platforms) {
+            p.y += offset;
+          }
+          score += offset * 0.01;
+          highestPlatformY = Math.min(...platforms.map((p) => p.y));
+        }
+
+        // Game over if player falls below the screen
+        if (player.y > canvas.height) {
+          gameOver();
+        }
+      }
+
+      function updatePlatforms() {
+        // When a platform goes below the screen, reposition it above the highest platform
+        for (let p of platforms) {
+          if (p.y > canvas.height) {
+            // Calculate a new x position: player's x plus a random offset within ±maxHorizontalOffset
+            let offset = (Math.random() * 2 - 1) * maxHorizontalOffset;
+            let newX = player.x + offset;
+            // Wrap-around horizontal if needed
+            if (newX < 0) newX = newX + canvas.width;
+            if (newX > canvas.width - platformWidth) newX = newX - canvas.width;
+            p.x = newX;
+            // Set new y position to be exactly one platformGap above the highest platform
+            p.y = highestPlatformY - platformGap;
+            highestPlatformY = p.y;
+          }
+        }
+      }
+
+      function checkCollisions() {
+        // When falling (vy > 0), check if the player lands on a platform
+        if (player.vy > 0) {
+          for (let p of platforms) {
+            if (
+              player.x + player.width > p.x &&
+              player.x < p.x + p.width &&
+              player.y + player.height > p.y &&
+              player.y + player.height < p.y + p.height + 10 // Slight tolerance
+            ) {
+              player.vy = jumpPower;
+            }
+          }
+        }
+      }
+
+      function drawPlayer() {
+        ctx.fillStyle = player.color;
+        ctx.fillRect(player.x, player.y, player.width, player.height);
+      }
+
+      function drawPlatforms() {
+        for (let p of platforms) {
+          ctx.fillStyle = p.color;
+          ctx.fillRect(p.x, p.y, p.width, p.height);
+        }
+      }
+
+      function gameOver() {
+        isGameOver = true;
+        finalScoreEl.textContent = "Your Score: " + Math.floor(score);
+        gameOverMsg.style.display = "block";
+      }
+
+      // Keyboard event listeners
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "ArrowLeft") keys.left = true;
+        if (e.code === "ArrowRight") keys.right = true;
+      });
+      window.addEventListener("keyup", (e) => {
+        if (e.code === "ArrowLeft") keys.left = false;
+        if (e.code === "ArrowRight") keys.right = false;
+      });
+
+      restartBtn.addEventListener("click", init);
+
+      init();
+
+      // Optional: update canvas size on window resize
+      window.addEventListener("resize", () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      });
+    </script>
+  </body>
+</html>
